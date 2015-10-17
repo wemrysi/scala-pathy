@@ -29,16 +29,13 @@ sealed trait Path[+B,+T,+S] {
     dir: (Path[B,Dir,S], DirName) => X,
     file: (Path[B,Dir,S], FileName) => X
   ): X =
-    this match {
-      case Root         => root
-      case Current      => current
-      case ParentIn(d)  => parent(unsafeCoerceType(d))
-      case DirIn(d, n)  => dir(unsafeCoerceType(d), n)
-      case FileIn(d, n) => file(unsafeCoerceType(d), n)
-    }
-
-  def isAbsolute: Boolean
-  def isRelative = !isAbsolute
+    loop[B,T,S,X](
+                root.left,
+                current.left,
+      d      => parent(d).left,
+      (d, n) => dir(d, n).left,
+      (d, n) => file(d, n).left,
+      this)
 }
 
 object Path {
@@ -70,21 +67,11 @@ object Path {
 
   // Note: this ADT allows invalid paths, but the exposed functions
   // of the package do not.
-  private case object Current extends Path[Nothing,Nothing,Nothing] {
-    def isAbsolute = false
-  }
-  private case object Root extends Path[Nothing,Nothing,Nothing] {
-    def isAbsolute = true
-  }
-  private final case class ParentIn[B,T,S](parent: Path[B,T,S]) extends Path[B,T,S] {
-    def isAbsolute = parent.isAbsolute
-  }
-  private final case class DirIn[B,T,S](parent: Path[B,T,S], name: DirName) extends Path[B,T,S] {
-    def isAbsolute = parent.isAbsolute
-  }
-  private final case class FileIn[B,T,S](parent: Path[B,T,S], name: FileName) extends Path[B,T,S] {
-    def isAbsolute = parent.isAbsolute
-  }
+  private case object Current extends Path[Nothing,Nothing,Nothing]
+  private case object Root extends Path[Nothing,Nothing,Nothing]
+  private final case class ParentIn[B,T,S](parent: Path[B,T,S]) extends Path[B,T,S]
+  private final case class DirIn[B,T,S](parent: Path[B,T,S], name: DirName) extends Path[B,T,S]
+  private final case class FileIn[B,T,S](parent: Path[B,T,S], name: FileName) extends Path[B,T,S]
 
   type RelFile[S] = Path[Rel, File, S]
   type AbsFile[S] = Path[Abs, File, S]
@@ -112,6 +99,38 @@ object Path {
     case DirIn(_, name) => Some(name)
     case _              => None
   }
+
+  @tailrec
+  def loop[B,T,S,X](
+    root: => X \/ Path[B,T,S],
+    current: => X \/ Path[B,T,S],
+    parent: Path[B,Dir,S] => X \/ Path[B,T,S],
+    dir: (Path[B,Dir,S], DirName) => X \/ Path[B,T,S],
+    file: (Path[B,Dir,S], FileName) => X \/ Path[B,T,S],
+    path: Path[B,T,S]
+  ): X =
+    path match {
+      case Root => root match {
+        case -\/(x) => x
+        case \/-(p) => loop(root, current, parent, dir, file, p)
+      }
+      case Current => current match {
+        case -\/(x) => x
+        case \/-(p) => loop(root, current, parent, dir, file, p)
+      }
+      case ParentIn(d) => parent(unsafeCoerceType(d)) match {
+        case -\/(x) => x
+        case \/-(p) => loop(root, current, parent, dir, file, p)
+      }
+      case DirIn(d, n) => dir(unsafeCoerceType(d), n) match {
+        case -\/(x) => x
+        case \/-(p) => loop(root, current, parent, dir, file, p)
+      }
+      case FileIn(d, n) => file(unsafeCoerceType(d), n) match {
+        case -\/(x) => x
+        case \/-(p) => loop(root, current, parent, dir, file, p)
+      }
+    }
 
   implicit class PathOps[B,T,S](path: Path[B,T,S]) {
     def relativeTo[SS](dir: Path[B, Dir, SS]): Option[Path[Rel, T, SS]] = {
