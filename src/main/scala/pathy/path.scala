@@ -20,6 +20,23 @@ import scala.annotation.tailrec
 import scalaz._, Scalaz._
 
 sealed trait Path[+B,+T,+S] {
+  import Path._
+
+  def fold[X](
+    root: => X,
+    current: => X,
+    parent: Path[B,Dir,S] => X,
+    dir: (Path[B,Dir,S], DirName) => X,
+    file: (Path[B,Dir,S], FileName) => X
+  ): X =
+    this match {
+      case Root         => root
+      case Current      => current
+      case ParentIn(d)  => parent(unsafeCoerceType(d))
+      case DirIn(d, n)  => dir(unsafeCoerceType(d), n)
+      case FileIn(d, n) => file(unsafeCoerceType(d), n)
+    }
+
   def isAbsolute: Boolean
   def isRelative = !isAbsolute
 }
