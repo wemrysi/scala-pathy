@@ -19,11 +19,14 @@ package pathy
 import scala.Function.const
 
 import scala.annotation.tailrec
-import scalaz._
+import scalaz._, Tags.Conjunction
 import scalaz.std.anyVal._
 import scalaz.std.option._
+import scalaz.std.string._
 import scalaz.syntax.either._
+import scalaz.syntax.equal._
 import scalaz.syntax.monoid._
+import scalaz.syntax.show._
 
 /** Goals
   * 1. more type safety, make more invalid states unrepresentable
@@ -34,7 +37,9 @@ import scalaz.syntax.monoid._
   * 4. nicer syntax, would like / "foo" / "bar" / "baz" <= dir, what about file??
   */
 
-sealed abstract class Path2[B <: Path2.Base, T <: Path2.Typ]
+sealed abstract class Path2[B <: Path2.Base, T <: Path2.Typ] {
+  override def toString = this.shows
+}
 
 object Path2 {
   sealed trait Base
@@ -84,13 +89,11 @@ object Path2 {
 
   //--- Constructors ---
 
-  val rootDir: Path2[Abs, Dir] = Root
-  val / : Path2[Abs, Dir] = rootDir
+  def file(name: String): RFile =
+    file1(FileName(name))
 
-  val currentDir: Path2[Rel, Dir] = Current
-  // Eh.
-  val `./` : Path2[Rel, Dir] = currentDir
-  val `../` : Path2[Rel, Dir] = ParentIn(currentDir)
+  def file1(name: FileName): RFile =
+    FileIn(currentDir, name)
 
   def dir(name: String): RDir =
     dir1(DirName(name))
@@ -98,13 +101,19 @@ object Path2 {
   def dir1(name: DirName): RDir =
     DirIn(currentDir, name)
 
-  def file(name: String): RFile =
-    file1(FileName(name))
+  val currentDir: Path2[Rel, Dir] = Current
 
-  def file1(name: FileName): RFile =
-    FileIn(currentDir, name)
+  val rootDir: Path2[Abs, Dir] = Root
 
   //--- Combinators ---
+
+  def append[B <: Base, T <: Typ](d: Path2[B, Dir], p: RPath[T]): Path2[B, T] =
+    p match {
+      case FileIn(pp, n) => FileIn(append(d, pp), n)
+      case DirIn(pp, n)  => DirIn(append(d, pp), n)
+      case ParentIn(pp)  => append(parentDir(d), pp)
+      case Current       => d
+    }
 
   val depth: Path2[_, _] => Int =
     foldMap(const(1), const(1), -1, _)
@@ -118,10 +127,6 @@ object Path2 {
 
   val fileName: Path2[_, File] => FileName = {
     case FileIn(_, n) => n
-  }
-
-  def fileParent[B <: Base]: Path2[B, File] => Path2[B, Dir] = {
-    case FileIn(p, _) => p
   }
 
   def foldMap1[A: Semigroup](
@@ -161,7 +166,7 @@ object Path2 {
   def foldMapA1[A: Semigroup](
     fileIn: FileName => A,
     dirIn: DirName => A,
-    root: => A,
+    root: A,
     path: APath[_]
   ): A = {
     @tailrec
@@ -178,14 +183,18 @@ object Path2 {
     }
   }
 
-  def foldMapA[A: Monoid](fileIn: FileName => A, dirIn: DirName => A, path: APath[_]): A =
+  def foldMapA[A: Monoid](
+    fileIn: FileName => A,
+    dirIn: DirName => A,
+    path: APath[_]
+  ): A =
     foldMapA1(fileIn, dirIn, mzero[A], path)
 
   def foldMapR1[A: Semigroup](
     fileIn: FileName => A,
     dirIn: DirName => A,
     parentIn: => A,
-    cur: => A,
+    cur: A,
     path: RPath[_]
   ): A = {
     @tailrec
@@ -212,14 +221,32 @@ object Path2 {
   ): A =
     foldMapR1(fileIn, dirIn, parentIn, mzero[A], path)
 
+  val isAbsolute: Path2[_, _] => Boolean =
+    (foldMap1(
+      const(Conjunction(true)),
+      const(Conjunction(true)),
+      Conjunction(false),
+      Conjunction(false),
+      Conjunction(true),
+      _: Path2[_, _]
+    )) andThen Conjunction.unwrap
+
+  val isRelative: Path2[_, _] => Boolean =
+    isAbsolute andThen (!_)
+
   def maybeDir[B <: Base]: Path2[B, _] => Option[Path2[B, Dir]] =
     refineType(_).swap.toOption
 
   def maybeFile[B <: Base]: Path2[B, _] => Option[Path2[B, File]] =
     refineType(_).toOption
 
-  def parentDir[B <: Base]: Path2[B, _] => Option[Path2[B, Dir]] =
-    peel(_).map(_._1)
+  def parentDir[B <: Base]: Path2[B, _] => Path2[B, Dir] = {
+    case FileIn(p, _) => p
+    case DirIn(p, _)  => p
+    case ParentIn(p)  => ParentIn(ParentIn(p))
+    case Current      => ParentIn(Current)
+    case Root         => Root
+  }
 
   def peel[B <: Base]: Path2[B, _] => Option[(Path2[B, Dir], DirName \/ FileName)] = {
     case FileIn(d, n) => some((d, n.right))
@@ -237,6 +264,24 @@ object Path2 {
     case Root         => rootDir.left
   }
 
+  def relativeTo[B <: Base, T <: Typ](p: Path2[B, T], d: Path2[B, Dir]): Option[RPath[T]] = {
+    def go(d1: Path2[B, Dir], d2: Path2[B, Dir]): Option[RDir] =
+      if (d1 === d2)
+        some(currentDir)
+      else d1 match {
+        case DirIn(pp, n)  => go(pp, d2) map (append(_, dir1(n)))
+        case _             => none
+      }
+
+    p match {
+      case FileIn(pp, n)    => go(pp, d) map (append(_, file1(n)))
+      case dp @ DirIn(_, _) => go(dp, d)
+      case dp @ ParentIn(_) => go(dp, d)
+      case dp @ Current     => go(dp, d)
+      case dp @ Root        => go(dp, d)
+    }
+  }
+
   def renameDir[B <: Base](f: DirName => DirName): Path2[B, Dir] => Path2[B, Dir] = {
     case DirIn(d, n)     => DirIn(d, f(n))
     case p @ ParentIn(_) => p
@@ -247,4 +292,110 @@ object Path2 {
   def renameFile[B <: Base](f: FileName => FileName): Path2[B, File] => Path2[B, File] = {
     case FileIn(d, n) => FileIn(d, f(n))
   }
+
+  //--- Syntax ---
+
+  final implicit class PathOps[B <: Base, T <: Typ](val p: Path2[B, T]) extends AnyVal {
+    def depth: Int =
+      Path2.depth(p)
+
+    def foldMap1[A: Semigroup](
+      fileIn: FileName => A,
+      dirIn: DirName => A,
+      parentIn: => A,
+      cur: => A,
+      root: => A
+    ): A =
+      Path2.foldMap1(fileIn, dirIn, parentIn, cur, root, p)
+
+    def foldMap[A: Monoid](
+      fileIn: FileName => A,
+      dirIn: DirName => A,
+      parentIn: => A
+    ): A =
+      Path2.foldMap(fileIn, dirIn, parentIn, p)
+
+    def foldMapA1[A: Semigroup](
+      fileIn: FileName => A,
+      dirIn: DirName => A,
+      root: A
+    )(implicit ev: Leibniz[Nothing, Base, B, Abs]): A =
+      Path2.foldMapA1(fileIn, dirIn, root, ev.subst[({type f[x <: Base] = Path2[x, T]})#f](p))
+
+    def foldMapA[A: Monoid](
+      fileIn: FileName => A,
+      dirIn: DirName => A
+    )(implicit ev: Leibniz[Nothing, Base, B, Abs]): A =
+      Path2.foldMapA(fileIn, dirIn, ev.subst[({type f[x <: Base] = Path2[x, T]})#f](p))
+
+    def foldMapR1[A: Semigroup](
+      fileIn: FileName => A,
+      dirIn: DirName => A,
+      parentIn: => A,
+      cur: A
+    )(implicit ev: Leibniz[Nothing, Base, B, Rel]): A =
+      Path2.foldMapR1(fileIn, dirIn, parentIn, cur, ev.subst[({type f[x <: Base] = Path2[x, T]})#f](p))
+
+    def foldMapR[A: Monoid](
+      fileIn: FileName => A,
+      dirIn: DirName => A,
+      parentIn: => A
+    )(implicit ev: Leibniz[Nothing, Base, B, Rel]): A =
+      Path2.foldMapR(fileIn, dirIn, parentIn, ev.subst[({type f[x <: Base] = Path2[x, T]})#f](p))
+
+    def isAbsolute: Boolean =
+      Path2.isAbsolute(p)
+
+    def isRelative: Boolean =
+      Path2.isRelative(p)
+
+    def maybeDir: Option[Path2[B, Dir]] =
+      Path2.maybeDir(p)
+
+    def maybeFile: Option[Path2[B, File]] =
+      Path2.maybeFile(p)
+
+    def parentDir: Path2[B, Dir] =
+      Path2.parentDir(p)
+
+    def peel: Option[(Path2[B, Dir], DirName \/ FileName)] =
+      Path2.peel(p)
+
+    def refineType: Path2[B, Dir] \/ Path2[B, File] =
+      Path2.refineType(p)
+
+    def relativeTo(d: Path2[B, Dir]): Option[RPath[T]] =
+      Path2.relativeTo(p, d)
+  }
+
+  final implicit class FileOps[B <: Base](val p: Path2[B, File]) extends AnyVal {
+    def name: FileName =
+      Path2.fileName(p)
+
+    def rename(f: FileName => FileName): Path2[B, File] =
+      Path2.renameFile(f)(p)
+  }
+
+  final implicit class DirOps[B <: Base](val p: Path2[B, Dir]) extends AnyVal {
+    def /[T <: Typ](r: RPath[T]): Path2[B, T] =
+      Path2.append(p, r)
+
+    def /(n: String): Path2[B, Dir] =
+      p / dir(n)
+
+    def name: Option[DirName] =
+      Path2.dirName(p)
+
+    def rename(f: DirName => DirName): Path2[B, Dir] =
+      Path2.renameDir(f)(p)
+  }
+
+  //--- Instances ---
+
+  implicit def pathEqual[B <: Base, T <: Typ]: Equal[Path2[B, T]] =
+    Equal.equalA
+
+  // TODO: Replace w/posix codec
+  implicit def pathShow[B <: Base, T <: Typ]: Show[Path2[B, T]] =
+    Show.shows(foldMap1(_.value, _.value + "/", "../", "./", "/", _))
 }
