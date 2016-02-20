@@ -115,6 +115,12 @@ object Path2 {
       case Current       => d
     }
 
+  def asRelative[T <: Typ]: APath[T] => RPath[T] = {
+    case FileIn(p, n) => FileIn(asRelative(p), n)
+    case DirIn(p, n)  => DirIn(asRelative(p), n)
+    case Root         => currentDir
+  }
+
   val depth: Path2[_, _] => Int =
     foldMap(const(1), const(1), -1, _)
 
@@ -296,6 +302,9 @@ object Path2 {
   //--- Syntax ---
 
   final implicit class PathOps[B <: Base, T <: Typ](val p: Path2[B, T]) extends AnyVal {
+    def asRelative(implicit ev: Leibniz[Nothing, Base, B, Abs]): RPath[T] =
+      Path2.asRelative(ev.subst[({type f[x <: Base] = Path2[x, T]})#f](p))
+
     def depth: Int =
       Path2.depth(p)
 
