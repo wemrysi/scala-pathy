@@ -28,15 +28,6 @@ import scalaz.syntax.equal._
 import scalaz.syntax.monoid._
 import scalaz.syntax.show._
 
-/** Goals
-  * 1. more type safety, make more invalid states unrepresentable
-  * 2. nicer impl, take advantage of GADTs to avoid casting
-  * 3. increaased correctness
-  *   only allow parentIn to appear at the beginning of a path, i.e.
-  *   paths are always "canonical"/"normalized".
-  * 4. nicer syntax, would like / "foo" / "bar" / "baz" <= dir, what about file??
-  */
-
 sealed abstract class Path2[B <: Path2.Base, T <: Path2.Typ] {
   override def toString = this.shows
 }

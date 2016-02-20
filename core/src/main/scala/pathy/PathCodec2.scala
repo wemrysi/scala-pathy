@@ -38,7 +38,7 @@ or just ditch it alltogether?
   final class UnsandboxedPath[T <: Typ] private[PathCodec2] (
     private val rp: RPath[T]
   ) extends AnyVal {
-    def sandbox[B <: Base](d: Path2[B, Dir]): Option[RPath[T]] =
+    def sandbox[B <: Base](d: Path2[B, Dir]): Option[Path2[B, T]] =
       ???
   }
 }
