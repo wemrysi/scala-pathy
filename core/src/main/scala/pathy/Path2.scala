@@ -36,6 +36,8 @@ object Path2 {
   sealed trait Base
   sealed trait Abs extends Base
   sealed trait Rel extends Base
+  sealed trait Cur extends Rel
+  sealed trait Esc extends Rel
 
   sealed trait Typ
   sealed trait File extends Typ
@@ -70,9 +72,9 @@ object Path2 {
   private final case object Root
     extends Path2[Abs, Dir]
   private final case object Current
-    extends Path2[Rel, Dir]
-  private final case class ParentIn(parent: Path2[Rel, Dir])
-    extends Path2[Rel, Dir]
+    extends Path2[Cur, Dir]
+  private final case class ParentIn[B <: Rel](parent: Path2[B, Dir])
+    extends Path2[Esc, Dir]
   private final case class DirIn[B <: Base](parent: Path2[B, Dir], name: DirName)
     extends Path2[B, Dir]
   private final case class FileIn[B <: Base](parent: Path2[B, Dir], name: FileName)
@@ -97,6 +99,18 @@ object Path2 {
   val rootDir: Path2[Abs, Dir] = Root
 
   //--- Combinators ---
+
+  sealed trait Ascend[B <: Base] {
+    type Out <: Base
+    def apply[T <: Typ](p: Path2[B, T]): Path2[Out, Dir]
+  }
+
+  sealed abstract class AscendInstances0 {
+    implicit val ascendRel: Ascend[Rel] =
+      new Ascend[Rel] {
+        type Out = 
+      }
+  }
 
   def append[B <: Base, T <: Typ](d: Path2[B, Dir], p: RPath[T]): Path2[B, T] =
     p match {
