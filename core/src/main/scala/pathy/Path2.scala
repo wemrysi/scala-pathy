@@ -84,17 +84,17 @@ object Path2 {
     file1(FileName(name))
 
   def file1(name: FileName): RFile =
-    FileIn(currentDir, name)
+    FileIn(cur, name)
 
   def dir(name: String): RDir =
     dir1(DirName(name))
 
   def dir1(name: DirName): RDir =
-    DirIn(currentDir, name)
+    DirIn(cur, name)
 
-  val currentDir: Path2[Rel, Dir] = Current
+  val cur: Path2[Rel, Dir] = Current
 
-  val rootDir: Path2[Abs, Dir] = Root
+  val root: Path2[Abs, Dir] = Root
 
   //--- Combinators ---
 
@@ -109,7 +109,7 @@ object Path2 {
   def asRelative[T <: Typ]: APath[T] => RPath[T] = {
     case FileIn(p, n) => FileIn(asRelative(p), n)
     case DirIn(p, n)  => DirIn(asRelative(p), n)
-    case Root         => currentDir
+    case Root         => cur
   }
 
   val depth: Path2[_, _] => Int =
@@ -257,14 +257,14 @@ object Path2 {
     case FileIn(d, n) => FileIn(d, n).right
     case DirIn(d, n)  => DirIn(d, n).left
     case ParentIn(d)  => ParentIn(d).left
-    case Current      => currentDir.left
-    case Root         => rootDir.left
+    case Current      => cur.left
+    case Root         => root.left
   }
 
   def relativeTo[B <: Base, T <: Typ](p: Path2[B, T], d: Path2[B, Dir]): Option[RPath[T]] = {
     def go(d1: Path2[B, Dir], d2: Path2[B, Dir]): Option[RDir] =
       if (d1 === d2)
-        some(currentDir)
+        some(cur)
       else d1 match {
         case DirIn(pp, n)  => go(pp, d2) map (append(_, dir1(n)))
         case _             => none
@@ -382,6 +382,9 @@ object Path2 {
 
     def /(n: String): Path2[B, Dir] =
       p / dir(n)
+
+    def />(n: String): Path2[B, File] =
+      p / file(n)
 
     def name: Option[DirName] =
       Path2.dirName(p)
