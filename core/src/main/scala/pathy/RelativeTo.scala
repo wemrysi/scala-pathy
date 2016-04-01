@@ -27,7 +27,9 @@ sealed abstract class RelativeTo[B <: Base] {
 }
 
 object RelativeTo {
-  implicit val abs: RelativeTo[Abs] = new RelativeTo[Abs] {
+  type Aux[B <: Base, Out0[_ <: Typ]] = RelativeTo[B] { type Out[T <: Typ] = Out0[T] }
+
+  implicit val abs: Aux[Abs, LPath] = new RelativeTo[Abs] {
     type Out[T <: Typ] = LPath[T]
 
     def relativeTo[T <: Typ](p: APath[T], d: ADir): Option[LPath[T]] = {
@@ -35,8 +37,8 @@ object RelativeTo {
         if (d1 === d2)
           some(cur)
         else d1 match {
-          case DirIn(pp, n)  => go(pp, d2) map (append(_, dir1(n)))
-          case _             => none
+          case DirIn(pp, n) => go(pp, d2) map (append(_, dir1(n)))
+          case Root         => none
         }
 
       p match {
@@ -47,7 +49,7 @@ object RelativeTo {
     }
   }
 
-  implicit val loc: RelativeTo[Loc] = new RelativeTo[Loc] {
+  implicit val loc: Aux[Loc, LPath] = new RelativeTo[Loc] {
     type Out[T <: Typ] = LPath[T]
 
     def relativeTo[T <: Typ](p: LPath[T], d: LDir): Option[LPath[T]] = {
@@ -55,8 +57,8 @@ object RelativeTo {
         if (d1 === d2)
           some(cur)
         else d1 match {
-          case DirIn(pp, n)  => go(pp, d2) map (append(_, dir1(n)))
-          case _             => none
+          case DirIn(pp, n) => go(pp, d2) map (append(_, dir1(n)))
+          case Current      => none
         }
 
       p match {
@@ -66,26 +68,29 @@ object RelativeTo {
       }
     }
   }
-/*
-  implicit val esc: RelativeTo[Esc] = new RelativeTo[Esc] {
-    type Out[T <: Typ] = Path2[Esc, T] \/ Path2[Loc, T]
 
-    def relativeTo[T <: Typ](p: LPath[T], d: LDir): Path2[Esc, T] \/ LPath[T] = {
-      def go(d1: LDir, d2: LDir): Option[LDir] =
+  implicit val esc: Aux[Esc, RPath] = new RelativeTo[Esc] {
+    type Out[T <: Typ] = RPath[T]
+
+    def relativeTo[T <: Typ](p: Path2[Esc, T], d: Path2[Esc, Dir]): Option[RPath[T]] = {
+      def go(d1: Path2[Esc, Dir], d2: Path2[Esc, Dir]): Option[RPath[Dir]] =
         if (d1 === d2)
           some(cur)
         else d1 match {
-          case DirIn(pp, n)  => go(pp, d2) map (append(_, dir1(n)))
-          case _             => none
+          case DirIn(pp, n) =>
+            go(pp, d2) map (append(_, dir1(n)))
+          case ParentIn(p) =>
+            refineRel(p).fold(
+              e => go(e, d2) map (ParentIn(_)),
+              l => none)
         }
 
       p match {
         case FileIn(pp, n)    => go(pp, d) map (append(_, file1(n)))
         case dp @ DirIn(_, _) => go(dp, d)
-        case dp @ Current     => go(dp, d)
+        case dp @ ParentIn(_) => go(dp, d)
       }
     }
   }
-*/
 }
 

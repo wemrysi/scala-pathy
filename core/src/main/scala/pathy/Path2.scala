@@ -31,6 +31,9 @@ sealed abstract class Path2[B <: Path2.Base, T <: Path2.Typ] {
   override def toString = this.shows
 }
 
+// TODO: Lenses
+// TODO: How many aliases do we want, another set for `Esc` varieties?
+//       What about the version that fixes the type?
 object Path2 {
   sealed abstract class Base
   sealed abstract class Abs extends Base
@@ -44,6 +47,7 @@ object Path2 {
 
   type APath[T <: Typ] = Path2[Abs, T]
   type LPath[T <: Typ] = Path2[Loc, T]
+  type RPath[T <: Typ] = Path2[_ <: Rel, T]
 
   type AFile = APath[File]
   type LFile = LPath[File]
@@ -51,6 +55,7 @@ object Path2 {
   type ADir = APath[Dir]
   type LDir = LPath[Dir]
 
+  // TODO: Explicit extension.
   final case class FileName(value: String) extends AnyVal {
     def dropExtension: FileName = {
       val idx = value.lastIndexOf(".")
@@ -72,7 +77,7 @@ object Path2 {
     extends Path2[Abs, Dir]
   private[pathy] final case object Current
     extends Path2[Loc, Dir]
-  private[pathy] final case class ParentIn[T <: Rel](parent: Path2[T, Dir])
+  private[pathy] final case class ParentIn[B <: Rel](parent: Path2[B, Dir])
     extends Path2[Esc, Dir]
   private[pathy] final case class DirIn[B <: Base](parent: Path2[B, Dir], name: DirName)
     extends Path2[B, Dir]
@@ -230,18 +235,18 @@ object Path2 {
   def maybeDir[B <: Base]: Path2[B, _] => Option[Path2[B, Dir]] =
     refineType(_).swap.toOption
 
+  def maybeEsc[T <: Typ]: RPath[T] => Option[Path2[Esc, T]] =
+    refineRel(_).swap.toOption
+
   def maybeFile[B <: Base]: Path2[B, _] => Option[Path2[B, File]] =
     refineType(_).toOption
 
-/*
-  def parentDir[B <: Base]: Path2[B, _] => Path2[B, Dir] = {
-    case FileIn(p, _) => p
-    case DirIn(p, _)  => p
-    case ParentIn(p)  => ParentIn(ParentIn(p))
-    case Current      => ParentIn(Current)
-    case Root         => Root
-  }
-*/
+  def maybeLoc[T <: Typ]: RPath[T] => Option[Path2[Loc, T]] =
+    refineRel(_).toOption
+
+  def parentDir[B <: Base](p: Path2[B, _])(implicit B: ParentDir[B]): B.Out =
+    B.parentDir(p)
+
   def peel[B <: Base]: Path2[B, _] => Option[(Path2[B, Dir], DirName \/ FileName)] = {
     case FileIn(d, n) => some((d, n.right))
     case DirIn(d, n)  => some((d, n.left))
@@ -249,14 +254,23 @@ object Path2 {
     case Current      => none
     case Root         => none
   }
-/*
+
   def refineRel[B <: Rel, T <: Typ]: Path2[B, T] => Path2[Esc, T] \/ Path2[Loc, T] = {
-    case FileIn(d, n) => refineRel(d) bimap (_ / file1(n), _ / file1(n))
-    case DirIn(d, n)  => refineRel(d) bimap (_ / dir1(n), _ / dir1(n))
-    case ParentIn(d)  => ParentIn(d).left
-    case Current      => cur.right
+    // NB: scalac doesn't seem to be able to preserve the more specific
+    //     constraint that B <: Rel when pattern matching, even though FileIn / DirIn
+    //     are parametric in B <: Base.
+    case FileIn(d, n) =>
+      refineRel(d.asInstanceOf[Path2[B, Dir]]).bimap(_ / file1(n), _ / file1(n))
+    case DirIn(d, n)  =>
+      refineRel(d.asInstanceOf[Path2[B, Dir]]).bimap(_ / dir1(n), _ / dir1(n))
+    case ParentIn(d) =>
+      ParentIn(d).left
+    case Current =>
+      cur.right
+    case Root =>
+      scala.sys.error("because, scalac.")
   }
-*/
+
   def refineType[B <: Base]: Path2[B, _] => Path2[B, Dir] \/ Path2[B, File] = {
     case FileIn(d, n) => FileIn(d, n).right
     case DirIn(d, n)  => DirIn(d, n).left
@@ -279,12 +293,16 @@ object Path2 {
     case FileIn(d, n) => FileIn(d, f(n))
   }
 
+  def sandbox[B <: Base, T <: Typ](
+    e: Path2[Esc, T],
+    p: Path2[B, Dir])(
+    implicit B: Sandboxed[B]
+  ): Option[Path2[B, T]] =
+    B.sandbox(e, p)
+
   //--- Syntax ---
 
   final implicit class PathOps[B <: Base, T <: Typ](val p: Path2[B, T]) extends AnyVal {
-    def asRelative(implicit ev: Leibniz[Nothing, Base, B, Abs]): LPath[T] =
-      Path2.asRelative(ev.subst[({type f[x <: Base] = Path2[x, T]})#f](p))
-
     def depth: Int =
       Path2.depth(p)
 
@@ -304,32 +322,6 @@ object Path2 {
     ): A =
       Path2.foldMap(fileIn, dirIn, parentIn, p)
 
-    def foldMapA1[A: Semigroup](
-      fileIn: FileName => A,
-      dirIn: DirName => A,
-      root: A
-    )(implicit ev: Leibniz[Nothing, Base, B, Abs]): A =
-      Path2.foldMapA1(fileIn, dirIn, root, ev.subst[({type f[x <: Base] = Path2[x, T]})#f](p))
-
-    def foldMapA[A: Monoid](
-      fileIn: FileName => A,
-      dirIn: DirName => A
-    )(implicit ev: Leibniz[Nothing, Base, B, Abs]): A =
-      Path2.foldMapA(fileIn, dirIn, ev.subst[({type f[x <: Base] = Path2[x, T]})#f](p))
-
-    def foldMapL1[A: Semigroup](
-      fileIn: FileName => A,
-      dirIn: DirName => A,
-      cur: A
-    )(implicit ev: Leibniz[Nothing, Base, B, Loc]): A =
-      Path2.foldMapL1(fileIn, dirIn, cur, ev.subst[({type f[x <: Base] = Path2[x, T]})#f](p))
-
-    def foldMapL[A: Monoid](
-      fileIn: FileName => A,
-      dirIn: DirName => A
-    )(implicit ev: Leibniz[Nothing, Base, B, Loc]): A =
-      Path2.foldMapL(fileIn, dirIn, ev.subst[({type f[x <: Base] = Path2[x, T]})#f](p))
-
     def isAbsolute: Boolean =
       Path2.isAbsolute(p)
 
@@ -341,10 +333,10 @@ object Path2 {
 
     def maybeFile: Option[Path2[B, File]] =
       Path2.maybeFile(p)
-/*
-    def parentDir: Path2[B, Dir] =
+
+    def parentDir(implicit B: ParentDir[B]): B.Out =
       Path2.parentDir(p)
-*/
+
     def peel: Option[(Path2[B, Dir], DirName \/ FileName)] =
       Path2.peel(p)
 
@@ -378,6 +370,55 @@ object Path2 {
 
     def rename(f: DirName => DirName): Path2[B, Dir] =
       Path2.renameDir(f)(p)
+  }
+
+  final implicit class AbsOps[T <: Typ](val p: Path2[Abs, T]) extends AnyVal {
+    def asRelative: LPath[T] =
+      Path2.asRelative(p)
+
+    def foldMapA1[A: Semigroup](
+      fileIn: FileName => A,
+      dirIn: DirName => A,
+      root: A
+    ): A =
+      Path2.foldMapA1(fileIn, dirIn, root, p)
+
+    def foldMapA[A: Monoid](
+      fileIn: FileName => A,
+      dirIn: DirName => A
+    ): A =
+      Path2.foldMapA(fileIn, dirIn, p)
+  }
+
+  final implicit class RelOps[B <: Rel, T <: Typ](val p: Path2[B, T]) extends AnyVal {
+    def maybeEsc: Option[Path2[Esc, T]] =
+      Path2.maybeEsc(p)
+
+    def maybeLoc: Option[Path2[Loc, T]] =
+      Path2.maybeLoc(p)
+
+    def refineRel: Path2[Esc, T] \/ Path2[Loc, T] =
+      Path2.refineRel(p)
+  }
+
+  final implicit class LocOps[T <: Typ](val p: Path2[Loc, T]) extends AnyVal {
+    def foldMapL1[A: Semigroup](
+      fileIn: FileName => A,
+      dirIn: DirName => A,
+      cur: A
+    ): A =
+      Path2.foldMapL1(fileIn, dirIn, cur, p)
+
+    def foldMapL[A: Monoid](
+      fileIn: FileName => A,
+      dirIn: DirName => A
+    ): A =
+      Path2.foldMapL(fileIn, dirIn, p)
+  }
+
+  final implicit class EscOps[T <: Typ](val p: Path2[Esc, T]) extends AnyVal {
+    def sandbox[B <: Base : Sandboxed](d: Path2[B, Dir]): Option[Path2[B, T]] =
+      Path2.sandbox(p, d)
   }
 
   //--- Instances ---
