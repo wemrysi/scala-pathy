@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import pathy._, Path._
+import pathy._, Path.{Sandboxed => SBoxed, _}
 import scalaz._, Scalaz._
 
 object Examples extends App {
@@ -25,7 +25,7 @@ object Examples extends App {
   println(FileName("foo.png").changeExtension(_ => "svg"))
   println(FileName("foo.png").changeExtension(x => x.toUpperCase))
 
-  val abs1: Path[Abs, File, Sandboxed] = rootDir[Sandboxed] </> dir("foo") </> file("bar")
+  val abs1: Path[Abs, File, SBoxed] = rootDir[SBoxed] </> dir("foo") </> file("bar")
   println(printPath(abs1))
 
   println(abs1.show)

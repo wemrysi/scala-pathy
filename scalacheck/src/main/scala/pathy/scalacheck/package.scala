@@ -16,15 +16,15 @@
 
 package pathy
 
-import Path._
+import Path.{Sandboxed => Sboxed, _}
 
 import org.scalacheck.Gen
 
 package object scalacheck {
-  type AbsFileOf[A] = PathOf[Abs,File,Sandboxed,A]
-  type RelFileOf[A] = PathOf[Rel,File,Sandboxed,A]
-  type AbsDirOf[A]  = PathOf[Abs,Dir,Sandboxed,A]
-  type RelDirOf[A]  = PathOf[Rel,Dir,Sandboxed,A]
+  type AbsFileOf[A] = PathOf[Abs,File,Sboxed,A]
+  type RelFileOf[A] = PathOf[Rel,File,Sboxed,A]
+  type AbsDirOf[A]  = PathOf[Abs,Dir,Sboxed,A]
+  type RelDirOf[A]  = PathOf[Rel,Dir,Sboxed,A]
 
   /** Generator that distributes the available size to two component generators,
     * and then combines the results. Can be used to generate nested structures
