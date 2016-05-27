@@ -55,20 +55,22 @@ object Path2 {
   type ADir = APath[Dir]
   type LDir = LPath[Dir]
 
-  // TODO: Explicit extension.
-  final case class FileName(value: String) extends AnyVal {
-    def dropExtension: FileName = {
-      val idx = value.lastIndexOf(".")
-      if (idx == -1) this else FileName(value.substring(0, idx))
-    }
-
-    def extension: String = {
-      val idx = value.lastIndexOf(".")
-      if (idx == -1) "" else value.substring(idx + 1)
-    }
+  final case class FileName(value: String, extension: Option[String]) {
+    def dropExtension: FileName =
+      copy(extension = None)
 
     def modifyExtension(f: String => String): FileName =
-      FileName(dropExtension.value + "." + f(extension))
+      copy(extension = extension.map(f))
+  }
+
+  object FileName {
+    def apply(fn: String): FileName = {
+      val idx = fn.lastIndexOf(".")
+      if (idx == -1)
+        FileName(fn, None)
+      else
+        FileName(fn.substring(0, idx), Some(fn.substring(idx + 1, fn.length)))
+    }
   }
 
   final case class DirName(value: String) extends AnyVal
